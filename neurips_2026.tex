@@ -1,0 +1,559 @@
+\documentclass{article}
+
+\usepackage[final]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{amsmath}
+
+\title{Early Warning System for Telco Customer Churn:\\
+Predicting At-Risk Customers and Prioritizing Retention}
+
+\author{%
+  Pranjal Patel \\
+  \texttt{pbp88} \\
+  \And
+  Shlok Bohra \\
+  \texttt{sb2396} \\
+  \And
+  Romaan Roshan \\
+  \texttt{rr1346} \\
+}
+
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Customer churn poses a significant financial challenge for telecommunications providers,
+where retaining an existing customer is considerably less costly than acquiring a new one.
+This paper presents an early warning system for predicting customer churn using the IBM
+Telco Customer Churn dataset comprising 7,043 customers and 33 features.
+We develop a rigorous end-to-end machine learning pipeline that addresses target leakage
+removal, class imbalance, multicollinearity, and hyperparameter optimization.
+Three classifiers are compared---logistic regression, random forest, and gradient
+boosting---each trained within an \texttt{imblearn} pipeline using stratified
+five-fold cross-validation and tuned to maximize recall.
+Feature selection combines chi-squared tests, point-biserial correlation, and variance
+inflation factor analysis to retain 27 statistically significant predictors.
+The random forest achieves the highest recall (0.826) on the held-out test set, while
+gradient boosting achieves the best AUC-ROC (0.853).
+SHAP analysis identifies contract type, customer tenure, and internet service type
+as the dominant churn drivers.
+Cost-based threshold tuning further aligns model outputs with the asymmetric
+business cost of missing a churner versus issuing a false retention offer.
+Results demonstrate that interpretable, deployment-ready churn prediction is achievable
+with standard machine learning methods when the pipeline is carefully constructed.
+\end{abstract}
+
+
+\section{Introduction}
+
+Customer churn---the rate at which subscribers cancel or fail to renew their service---is
+one of the most consequential operational challenges facing subscription-based businesses.
+In the telecommunications sector, where service commoditization and low switching costs
+intensify competitive pressure, retaining existing customers is estimated to be five to
+seven times less expensive than acquiring new ones~\citep{vandenPoel2004}.
+Even a modest reduction in monthly churn can translate to millions of dollars in preserved
+revenue, making proactive churn prediction a high-value application of data science.
+
+The core research question of this work is: \emph{can we accurately predict which
+telecommunications customers are likely to churn, and which features most strongly drive
+that decision?} We frame churn prediction as a binary classification problem and develop
+an end-to-end pipeline on the publicly available IBM Telco Customer Churn
+dataset~\citep{ibmTelco2019}.
+
+Churn prediction is inherently asymmetric in cost. A \emph{false negative}---failing to
+identify a customer who subsequently leaves---results in lost customer lifetime value.
+A \emph{false positive}---flagging a loyal customer for a retention intervention---results
+in a wasted discount or support call, which is comparatively inexpensive. This asymmetry
+motivates prioritizing \emph{recall} over accuracy throughout our pipeline, and drives
+our use of cost-based threshold tuning to translate predicted probabilities into
+deployment-ready binary decisions.
+
+Our contributions are as follows:
+\begin{itemize}
+  \item A complete preprocessing pipeline that explicitly handles target leakage, missing
+        values, multicollinearity, and class imbalance.
+  \item A rigorous feature selection stage combining chi-squared tests, point-biserial
+        correlation, and variance inflation factor (VIF) analysis, each with documented
+        decision thresholds.
+  \item Comparison of logistic regression, random forest, and gradient boosting under
+        stratified cross-validation with hyperparameter tuning.
+  \item SHAP-based model interpretation connecting feature impacts to actionable business
+        recommendations.
+  \item Cost-based threshold optimization grounded in the business cost asymmetry between
+        false negatives and false positives.
+\end{itemize}
+
+
+\section{Related Work}
+
+\paragraph{Churn prediction in telecommunications.}
+Early work on churn prediction relied heavily on survival analysis and logistic regression
+to model subscriber attrition~\citep{vandenPoel2004}. \citet{verbeke2012} conducted a
+comprehensive benchmark of classification methods for telecom churn, finding that
+ensemble methods and profit-driven evaluation metrics outperform classical approaches when
+the cost asymmetry between churn types is explicitly modeled. \citet{coussement2008}
+demonstrated the utility of support vector machines for subscription churn but noted the
+importance of feature engineering specific to the billing and contract domain.
+
+\paragraph{Ensemble methods.}
+Random forests~\citep{breiman2001} and gradient boosting machines~\citep{friedman2001}
+have become the dominant approaches in tabular classification benchmarks. Random forests
+reduce variance through bootstrap aggregation of decorrelated trees, while gradient
+boosting reduces bias by sequentially fitting residuals. Both methods provide
+feature importance scores as a natural by-product of training, which we leverage for
+interpretation alongside SHAP values.
+
+\paragraph{Class imbalance.}
+Churn datasets are structurally imbalanced: churners typically represent 20--30\% of
+customers. Standard accuracy maximization silently favors predicting the majority class.
+\citet{chawla2002} introduced SMOTE (Synthetic Minority Oversampling Technique), which
+generates synthetic minority samples by interpolating between existing ones.
+\citet{heGarcia2009} provide a comprehensive survey of imbalance learning strategies,
+including cost-sensitive learning via class weighting, which we compare empirically
+against SMOTE.
+
+\paragraph{Model interpretability.}
+\citet{lundberg2017} introduced SHAP (SHapley Additive exPlanations), a unified
+framework rooted in cooperative game theory that assigns each feature a contribution
+value consistent with local model behavior. Unlike permutation importance or Gini
+impurity, SHAP values are both locally faithful and globally consistent, making them
+the preferred tool for explaining individual predictions in deployment
+settings~\citep{molnar2020}.
+
+\paragraph{Evaluation under imbalance.}
+\citet{fawcett2006} established ROC analysis as the standard for comparing classifiers
+across operating conditions. Under class imbalance, precision-recall curves are
+more informative than ROC curves because they focus on classifier behavior over the
+minority class, avoiding the optimistic distortion introduced by the large number of
+true negatives~\citep{davis2006}.
+
+
+\section{Method}
+
+\subsection{Dataset}
+
+We use the IBM Telco Customer Churn dataset~\citep{ibmTelco2019}, which contains
+records for 7,043 customers of a fictional California telecommunications provider.
+Each record includes 33 features spanning four categories: demographic attributes
+(gender, senior citizen status, partner, dependents), account characteristics
+(tenure, contract type, paperless billing, payment method), subscribed services
+(phone, internet, online security, streaming), and billing (monthly charges, total charges).
+The binary target variable \texttt{Churn Value} indicates whether the customer left
+within the last month. The overall churn rate is 26.5\% (1,869 churners),
+yielding a class imbalance ratio of approximately 2.8:1.
+
+\subsection{Preprocessing}
+
+\paragraph{Leakage removal.}
+Four columns were removed prior to any modeling due to direct or proxy leakage of the
+target: \texttt{Churn Score} (a precomputed churn propensity score), \texttt{CLTV}
+(customer lifetime value computed post-churn), \texttt{Churn Reason} (free-text
+exit survey field), and \texttt{Churn Label} (a string duplicate of the target).
+Including any of these would constitute data leakage and invalidate all downstream results.
+
+\paragraph{Non-informative columns.}
+Nine geographic and identifier columns were removed: \texttt{CustomerID},
+\texttt{Count}, \texttt{Country}, \texttt{State}, \texttt{City}, \texttt{Zip Code},
+\texttt{Lat Long}, \texttt{Latitude}, and \texttt{Longitude}. These carry no
+predictive signal for individual churn behavior.
+
+\paragraph{Type correction.}
+\texttt{Total Charges} is stored as a string column containing approximately 11
+blank-space entries corresponding to customers with zero tenure (i.e., customers
+enrolled mid-period who have not yet been billed). These entries were coerced to
+numeric and imputed with zero, consistent with the interpretation that no charges
+have accrued.
+
+\paragraph{Encoding.}
+All 16 remaining categorical columns were one-hot encoded with \texttt{drop\_first=True}
+to avoid the dummy variable trap. The resulting design matrix has 30 features prior
+to selection.
+
+\subsection{Feature Selection}
+
+Three complementary statistical tests were applied, each with a documented decision rule:
+
+\textbf{Chi-squared test} (binary features). For each of the 27 binary columns produced
+by one-hot encoding, a $\chi^2$ independence test was conducted against the churn label
+using training data only. Features with $p \geq 0.05$ were dropped. Three features were
+removed: \texttt{Gender\_Male}, \texttt{Phone Service\_Yes}, and
+\texttt{Multiple Lines\_No phone service}.
+
+\textbf{Point-biserial correlation} (continuous features). For each of the three
+continuous features---\texttt{Tenure Months}, \texttt{Monthly Charges},
+\texttt{Total Charges}---the point-biserial correlation with the binary churn target
+was computed. All three exceeded the significance threshold ($p < 0.05$) and were retained.
+
+\textbf{Variance inflation factor} (multicollinearity). VIF was computed for all retained
+continuous features. The maximum observed VIF was 8.21 for \texttt{Total Charges},
+below the standard threshold of 10. No features were dropped at this stage.
+
+The final feature set consists of 27 predictors.
+
+\subsection{Class Imbalance Handling}
+
+Two strategies were evaluated via five-fold stratified cross-validation on logistic
+regression as a representative model:
+
+\begin{enumerate}
+  \item \textbf{Class weighting}: \texttt{class\_weight=`balanced'} scales the loss
+        contribution of minority class samples inversely proportional to class frequency.
+  \item \textbf{SMOTE}: Synthetic minority samples are generated by interpolating
+        between $k$-nearest neighbors in the minority class. Critically, SMOTE is
+        applied \emph{inside} the cross-validation pipeline using \texttt{imblearn.pipeline},
+        ensuring that synthetic samples from a given validation fold's neighborhood
+        never contaminate that fold's training data.
+\end{enumerate}
+
+Both strategies produced nearly identical cross-validated recall (0.814 vs.\ 0.801)
+and F1 scores (0.642 vs.\ 0.645). We selected class weighting for all final models
+because it avoids synthetic data generation and introduces no additional hyperparameters.
+
+\subsection{Model Training}
+
+All models were wrapped in an \texttt{imblearn.Pipeline} to enforce that preprocessing
+(scaling for logistic regression) is fitted on training folds only. Hyperparameter
+search used \texttt{GridSearchCV} with \texttt{StratifiedKFold}($k=5$), optimizing recall.
+
+\textbf{Logistic regression.} Regularization strength $C \in \{0.01, 0.1, 1, 10\}$
+was searched. Features were standardized via \texttt{StandardScaler} inside the pipeline.
+Best configuration: $C = 1$.
+
+\textbf{Random forest.} Number of estimators $\in \{100, 200\}$ and maximum depth
+$\in \{4, 8, \text{None}\}$ were searched. Best configuration: 100 estimators,
+maximum depth 4.
+
+\textbf{Gradient boosting.} Learning rate $\in \{0.05, 0.1\}$, number of estimators
+$\in \{100, 200\}$, and maximum depth $\in \{3, 5\}$ were searched. Best configuration:
+200 estimators, learning rate 0.05, maximum depth 3.
+
+An 80/20 stratified train-test split was used throughout. The test set was held out
+entirely until final evaluation; no decisions were made based on test set performance.
+
+\subsection{Threshold Optimization}
+
+By default, models classify a customer as a churner if their predicted probability
+exceeds 0.5. Given the asymmetric cost structure, we optimize the threshold $\tau^*$ by
+minimizing:
+\begin{equation}
+  \mathcal{C}(\tau) = c_{\text{FP}} \cdot (1 - \text{Precision}(\tau))
+                    + c_{\text{FN}} \cdot (1 - \text{Recall}(\tau))
+\end{equation}
+where $c_{\text{FP}}$ and $c_{\text{FN}}$ are the relative costs of false positives and
+false negatives respectively. We use a ratio of $c_{\text{FN}} : c_{\text{FP}} = 10:1$,
+reflecting the practical asymmetry between lost customer lifetime value and a wasted
+retention discount. The optimal threshold is identified by sweeping over the precision-recall
+curve of the best-performing model.
+
+
+\section{Evaluation}
+
+\subsection{Dummy Baseline}
+
+Prior to evaluating learned models, a \texttt{DummyClassifier} predicting the majority
+class for every input was established as a performance floor. This baseline achieves
+73.4\% accuracy but 0\% recall on the churn class, confirming that accuracy is a
+misleading metric under class imbalance and that any useful model must substantially
+outperform this floor on recall.
+
+\subsection{Model Performance}
+
+Table~\ref{tab:results} reports precision, recall, F1 score, and AUC-ROC for all
+three models on the held-out test set at the default threshold of 0.5.
+
+\begin{table}[h]
+  \caption{Test-set performance of all three models at threshold 0.5.
+           Random forest achieves the highest recall; gradient boosting achieves
+           the highest AUC-ROC.}
+  \label{tab:results}
+  \centering
+  \begin{tabular}{lcccc}
+    \toprule
+    Model & Precision & Recall & F1 & AUC-ROC \\
+    \midrule
+    Dummy Classifier        & 0.000 & 0.000 & 0.000 & 0.500 \\
+    Logistic Regression     & 0.511 & 0.783 & 0.619 & 0.849 \\
+    Random Forest           & 0.512 & \textbf{0.826} & \textbf{0.632} & 0.846 \\
+    Gradient Boosting       & \textbf{0.656} & 0.540 & 0.592 & \textbf{0.853} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+All three learned models achieve substantially higher recall than the dummy baseline.
+The random forest is the best model for deployment scenarios prioritizing recall,
+catching 82.6\% of actual churners on the test set. Gradient boosting, while lower in
+recall at the default threshold, achieves the best overall discriminative ability
+(AUC-ROC 0.853) and the highest precision (0.656), making it preferable when
+intervention budgets are constrained.
+
+\begin{figure}[h]
+  \centering
+  \begin{subfigure}[b]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{roc_curves.png}
+    \caption{ROC curves for all three models. Gradient boosting marginally leads
+             in AUC-ROC (0.853).}
+    \label{fig:roc}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{pr_curves.png}
+    \caption{Precision-Recall curves. All models substantially exceed the random
+             baseline (dashed line at 0.27).}
+    \label{fig:pr}
+  \end{subfigure}
+  \caption{Discrimination performance on the held-out test set.}
+  \label{fig:curves}
+\end{figure}
+
+\subsection{Overfitting Analysis}
+
+To verify generalization, we compare training-set recall against mean cross-validated
+recall for each model. The gaps are 0.002 (logistic regression), 0.014 (random forest),
+and 0.053 (gradient boosting), all below the 0.08 threshold we set as a warning criterion.
+No model exhibits meaningful overfitting, consistent with the regularization introduced
+by depth constraints and class weighting.
+
+\subsection{Confusion Matrices}
+
+Figure~\ref{fig:cm} shows the confusion matrices for all three models at the default
+threshold. The random forest misses only 65 churners (false negatives) compared to 81
+for logistic regression, while gradient boosting is considerably more conservative,
+missing 172 churners but flagging fewer loyal customers incorrectly.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.95\linewidth]{confusion_matrices.png}
+  \caption{Confusion matrices on the test set (threshold = 0.5). Random forest
+           catches the most churners (309 true positives, 65 false negatives).}
+  \label{fig:cm}
+\end{figure}
+
+\subsection{Threshold Optimization}
+
+Applying cost-based threshold optimization to the gradient boosting model (highest
+AUC-ROC) with cost ratio $c_{\text{FN}}:c_{\text{FP}} = 10:1$ yields an optimal
+threshold of 0.023. At this threshold, recall increases to 1.000 and precision
+decreases to 0.311. While a threshold this low is aggressive, it illustrates the
+direct connection between the business cost ratio and the deployment operating point:
+organizations with high customer lifetime value and low retention offer costs should
+operate at correspondingly lower thresholds. Figure~\ref{fig:threshold} shows the
+cost curve and the precision-recall trade-off across all thresholds.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.75\linewidth]{threshold_tuning.png}
+  \caption{Cost-based threshold optimization for gradient boosting ($c_{\text{FN}}=10$,
+           $c_{\text{FP}}=1$). The red dashed line marks the optimal threshold (0.023)
+           that minimizes total expected cost.}
+  \label{fig:threshold}
+\end{figure}
+
+
+\section{Discussion}
+
+\subsection{Feature Importance and SHAP Analysis}
+
+SHAP values were computed for the random forest using \texttt{TreeExplainer}, which
+exactly decomposes each prediction into per-feature contributions consistent with
+Shapley values from cooperative game theory. Figure~\ref{fig:shap} shows the mean
+absolute SHAP impact across the test set.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.75\linewidth]{shap_bar.png}
+  \caption{Mean absolute SHAP values for the random forest. Contract type and
+           customer tenure are the two most impactful predictors of churn.}
+  \label{fig:shap}
+\end{figure}
+
+The five most impactful features are:
+
+\textbf{Contract type (Two-year contract).} Being on a two-year contract is the
+strongest predictor of \emph{reduced} churn risk. Month-to-month customers, lacking
+contractual lock-in, exhibit the highest attrition rates. This is consistent with
+findings in~\citet{verbeke2012}.
+
+\textbf{Tenure months.} Longer tenure strongly correlates with loyalty. The
+point-biserial correlation of $-0.346$ confirms that the relationship is inverse:
+newer customers are significantly more likely to churn. This suggests a critical
+intervention window in the first 12 months.
+
+\textbf{Internet service (Fiber Optic).} Fiber Optic subscribers churn at
+disproportionately high rates despite paying premium prices, suggesting unmet
+quality expectations rather than price sensitivity.
+
+\textbf{Dependents.} Customers with dependents are less likely to churn, potentially
+because service switching involves coordinating across a household.
+
+\textbf{Electronic check payment.} This payment method is associated with elevated
+churn risk, possibly as a proxy for lower service engagement or financial instability.
+
+\subsection{Business Recommendations}
+
+Based on SHAP findings, we derive five specific, quantifiable recommendations:
+
+\begin{enumerate}
+  \item \textbf{Early tenure intervention.} Offer discounted annual contracts to
+        month-to-month customers at month 6, before the most common churn window.
+        Customers on month-to-month contracts with tenure under 12 months represent
+        the modal churner profile in this dataset.
+
+  \item \textbf{Add-on bundling for high-charge customers.} Customers paying above
+        \$65/month without \texttt{Online Security} or \texttt{Tech Support} show
+        elevated churn risk. Bundling these services into a loyalty tier can simultaneously
+        reduce churn and increase average revenue per user.
+
+  \item \textbf{Deployment threshold calibration.} Replace the default threshold of 0.5
+        with the cost-optimized threshold derived from the organization's estimated
+        $c_{\text{FN}}:c_{\text{FP}}$ ratio. At a 10:1 ratio, the threshold drops
+        substantially, prioritizing recall over precision.
+
+  \item \textbf{Fiber Optic quality audit.} Before deploying price-based retention
+        incentives to Fiber Optic subscribers, conduct a service quality survey.
+        High churn among premium subscribers is a service quality signal, not
+        a pricing signal.
+
+  \item \textbf{Senior citizen support program.} Senior citizens exhibit
+        above-average churn rates, likely reflecting difficulty with self-service
+        channels or billing complexity. A dedicated support tier for this segment
+        can reduce churn without requiring discounts.
+\end{enumerate}
+
+\subsection{Model Selection Trade-offs}
+
+Each model occupies a distinct position in the interpretability-performance trade-off space.
+Logistic regression provides the most transparent predictions via signed coefficients with
+confidence intervals, making it preferable for regulated environments where prediction
+explanations must be provided to customers. Random forest maximizes recall at the default
+threshold, making it the best default deployment choice for high-volume outreach programs.
+Gradient boosting maximizes AUC-ROC and precision, making it optimal for constrained
+retention budgets where false positives are costly.
+
+
+\section{Limitations}
+
+\textbf{Dataset currency and scope.} The IBM Telco dataset is a synthetic educational
+sample rather than a live customer database. It does not reflect current market
+dynamics, carrier-specific customer behavior, or temporal effects such as pricing
+changes or competitive events. Models trained on this dataset should not be deployed
+without validation on proprietary operational data.
+
+\textbf{Static modeling.} Our models capture a single snapshot of customer behavior.
+Churn drivers evolve over time as pricing, technology, and competition change.
+Production deployment would require scheduled retraining and monitoring for
+covariate shift.
+
+\textbf{No causal identification.} High SHAP impact does not imply causation.
+The association between contract type and churn, for example, may partially reflect
+selection effects (i.e., customers who intend to leave are less likely to sign
+long-term contracts in the first place). Retention strategies based on our findings
+should be validated with randomized A/B experiments before large-scale rollout.
+
+\textbf{Cost ratio sensitivity.} The optimal threshold depends directly on the
+assumed $c_{\text{FN}}:c_{\text{FP}}$ ratio. We used an illustrative ratio of 10:1;
+in practice, this ratio should be estimated from customer lifetime value models
+and the cost structure of the retention intervention program.
+
+\textbf{Geographic features excluded.} City and zip code features were dropped as
+non-informative for a synthetic dataset. In real deployment, geographic features
+may capture significant variation in churn behavior due to regional competition
+or infrastructure quality.
+
+
+\begin{ack}
+This project was completed as part of CS 439. No external funding was received.
+The IBM Telco Customer Churn dataset is publicly available on Kaggle under a
+community data license.
+\end{ack}
+
+
+\section*{References}
+
+{
+\small
+
+[1] Breiman, L. (2001). Random forests. \textit{Machine Learning}, 45(1), 5--32.
+
+[2] Chawla, N.V., Bowyer, K.W., Hall, L.O., \& Kegelmeyer, W.P. (2002). SMOTE:
+Synthetic minority over-sampling technique. \textit{Journal of Artificial Intelligence
+Research}, 16, 321--357.
+
+[3] Coussement, K. \& Van den Poel, D. (2008). Churn prediction in subscription
+services using support vector machines. \textit{Expert Systems with Applications},
+34(1), 313--327.
+
+[4] Davis, J. \& Goadrich, M. (2006). The relationship between Precision-Recall and
+ROC curves. In \textit{Proceedings of the 23rd ICML}, pp.\ 233--240.
+
+[5] Fawcett, T. (2006). An introduction to ROC analysis. \textit{Pattern Recognition
+Letters}, 27(8), 861--874.
+
+[6] Friedman, J.H. (2001). Greedy function approximation: a gradient boosting machine.
+\textit{Annals of Statistics}, 29(5), 1189--1232.
+
+[7] He, H. \& Garcia, E.A. (2009). Learning from imbalanced data. \textit{IEEE
+Transactions on Knowledge and Data Engineering}, 21(9), 1263--1284.
+
+[8] IBM Corporation. (2019). Telco Customer Churn Dataset. Kaggle.
+\url{https://www.kaggle.com/datasets/blastchar/telco-customer-churn}
+
+[9] Lundberg, S.M. \& Lee, S.I. (2017). A unified approach to interpreting model
+predictions. In \textit{Advances in Neural Information Processing Systems}, 30.
+
+[10] Molnar, C. (2020). \textit{Interpretable Machine Learning}. Lulu.com.
+
+[11] Van den Poel, D. \& Larivi\`{e}re, B. (2004). Customer attrition analysis for
+financial services using proportional hazard models. \textit{European Journal of
+Operational Research}, 157(1), 196--217.
+
+[12] Verbeke, W., Dejaeger, K., Martens, D., Hur, J., \& Baesens, B. (2012). New
+insights into churn prediction in the telecommunication sector: A profit driven data
+mining approach. \textit{European Journal of Operational Research}, 218(1), 211--229.
+
+}
+
+
+\appendix
+
+\section{Additional Results}
+
+Table~\ref{tab:featsel} summarizes the feature selection decisions made at each stage
+of the selection pipeline.
+
+\begin{table}[h]
+  \caption{Feature selection summary. 27 of 30 encoded features were retained.}
+  \label{tab:featsel}
+  \centering
+  \begin{tabular}{lccc}
+    \toprule
+    Stage & Test & Features evaluated & Features dropped \\
+    \midrule
+    Chi-squared      & $\chi^2$, $p < 0.05$     & 27 binary   & 3 \\
+    Point-biserial   & $r_{pb}$, $p < 0.05$     & 3 continuous & 0 \\
+    VIF              & VIF $\leq 10$            & 3 continuous & 0 \\
+    \midrule
+    \textbf{Final}   &                           & \textbf{27} & \textbf{3} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The three features removed by chi-squared testing were \texttt{Gender\_Male}
+($p = 0.481$), \texttt{Phone Service\_Yes} ($p = 0.481$), and
+\texttt{Multiple Lines\_No phone service} ($p = 0.481$). The maximum VIF observed
+among continuous features was 8.21 (\texttt{Total Charges}), below the
+multicollinearity threshold of 10.
+
+\end{document}

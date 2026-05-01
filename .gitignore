@@ -1,0 +1,20 @@
+# Internal generator scripts
+build_notebook.py
+
+# Blank (no-output) notebook — submit the executed version
+telco_churn_analysis.ipynb
+
+# Redundant IBM CSV (project uses the Kaggle Excel file)
+Telco-Customer-Churn.csv
+
+# Loose PNG exports (plots are embedded in the notebook)
+*.png
+
+# Claude Code settings
+.claude/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
