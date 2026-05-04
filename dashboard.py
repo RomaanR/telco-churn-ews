@@ -311,7 +311,7 @@ with tab4:
         return colours.get(val, '')
 
     st.dataframe(
-        filtered.style.applymap(colour_risk, subset=['Risk Level']).format(
+        filtered.style.map(colour_risk, subset=['Risk Level']).format(
             {'Churn Probability': '{:.3f}'}),
         use_container_width=True,
         height=400,
