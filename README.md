@@ -19,7 +19,6 @@ The main goal was not just to predict churn, but to make the results useful for 
 - `train_and_save.py` — training script used to build and save model artifacts
 - `dashboard_artifacts.pkl` — saved models and outputs used by the dashboard
 - `requirements.txt` — Python packages needed to run the project
-- `neurips_2026.tex` — final project report template in LaTeX format
 
 ## How to run
 
