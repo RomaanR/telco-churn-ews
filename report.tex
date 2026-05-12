@@ -1,0 +1,394 @@
+\documentclass{article}
+
+% NeurIPS 2026 formatting. Use the official neurips_2026.sty file in the same
+% directory when compiling. The preprint option keeps the student authors visible.
+\usepackage[preprint]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\graphicspath{{./}{figures/}}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{makecell}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{capt-of}
+
+
+\title{Early Warning System for Telco Customer Churn: Predicting At-Risk Customers and Prioritizing Retention}
+
+\author{%
+  Pranjal Patel \\
+  Romaan Roshan \\
+  Shlok Bohra
+}
+
+\newcommand{\projecttitleblock}{%
+\begin{center}
+\vspace*{-0.15in}
+\rule{0.92\linewidth}{2.4pt}\\[1.25em]
+{\LARGE\bfseries Early Warning System for Telco Customer Churn: Predicting\\
+At-Risk Customers and Prioritizing Retention\par}
+\vspace{1.25em}
+\rule{0.92\linewidth}{0.6pt}\\[1.15em]
+{\normalsize Pranjal Patel, Section 6, pbp88\\Romaan Roshan, Section 6, rr1346\\Shlok Bohra, Section 5, sb2396\par}
+\vspace{1.5em}
+\end{center}
+}
+
+\begin{document}
+
+\projecttitleblock
+
+\begin{abstract}
+Customer churn is a major challenge for telecommunications providers because it reduces recurring revenue and increases customer acquisition costs. This project develops a machine learning-based early warning system using the IBM Telco Customer Churn dataset to predict likely churners and support retention decisions. The dataset contains 7,043 customer records with demographic, contract, billing, service, and churn information. We clean and preprocess the data by removing non-informative and leakage-prone variables, converting numerical fields, one-hot encoding categorical features, and applying stratified train-test splitting. To address class imbalance, we compare class-weighted learning with SMOTE and select balanced class weights for strong recall without synthetic examples. Logistic Regression, Random Forest, and Gradient Boosting are trained and evaluated for performance and interpretability. Random Forest achieves the strongest recall, making it most useful for identifying at-risk customers. We built the Streamlit dashboard so a user can change the churn threshold, see how recall and precision move, and review which customers should be prioritized for retention.  GitHub linked \href{https://github.com/RomaanR/telco-churn-ews}{here}. 
+
+\end{abstract}
+
+\section{Introduction}
+Customer churn refers to customers who discontinue service with a company. In telecommunications, churn prediction is especially important because customers have multiple provider options and low switching barriers. Identifying high-risk customers before they leave allows a company to intervene through targeted retention offers, service support, or contract-based incentives. Churn prediction is not a symmetric classification problem. Missing a true churner may represent lost customer lifetime value, while incorrectly flagging a loyal customer may only create an unnecessary retention offer. Therefore, this project emphasizes recall, precision-recall analysis, and threshold tuning rather than accuracy alone. The objective is to build an interpretable early warning system on the IBM Telco Customer Churn dataset by combining supervised learning, explainable AI, and a Streamlit dashboard where business users can select models, adjust thresholds, interpret churn drivers, and view customers ranked by churn probability.
+
+\section{Related Work}
+\subsection{Customer churn prediction and model comparison}
+Customer churn prediction has been studied extensively because companies benefit from identifying likely defectors before they leave. Neslin et al.~\cite{neslin2006} examined customer churn modeling through a prediction tournament involving both academic and practitioner teams and found that methodological choices significantly affect churn prediction accuracy, underscoring the need to compare multiple models rather than rely on a single classifier. Lemmens and Croux~\cite{lemmens2006} also studied churn prediction using bagging and boosting classification trees on wireless telecommunications data, finding that ensemble tree methods can significantly improve predictive performance. These studies support our use of tree-based models alongside a linear baseline, and motivate our decision to compare Logistic Regression, Random Forest, and Gradient Boosting rather than a simple, single classifier.
+
+\subsection{Interpretability in telecom churn modeling}
+ Amin et al.~\cite{amin2017} examined using interpretable rule-based methods for telecommunications churn prediction and proposed an approach that focused on extracting factors that distinguish churners from non-churners. Their work shows that interpretability is important when churn models are used for customer retention decisions, so businesses understand why a customer is flagged before acting on it. This relates to our project because we evaluate not only model accuracy but also feature importance, and explain model behavior through the dashboard using both Logistic Regression coefficients and SHAP values.
+
+\subsection{Class imbalance and business value}
+Class imbalance is another important issue in churn prediction, as churners often constitute the minority class. Burez and Van den Poel~\cite{burez2009} studied methods for handling class imbalance in customer churn prediction and argued that accuracy alone can be misleading for imbalanced churn datasets. They emphasized evaluation metrics such as AUC and lift rather than relying solely on overall accuracy. Additionally, some studies also argue that churn prediction should be connected to business value rather than treated only as a classification task. Glady et al.~\cite{glady2009} proposed evaluating churn models using customer lifetime value, showing that the financial impact of classification errors should be considered when designing churn interventions. This motivates our dashboard's threshold-tuning interface that lets users adjust the decision cutoff based on whether the business prioritizes catching churners or reducing retention outreach, and our cost-based comparison of models shown in section 5. 
+
+\subsection{Our contribution}
+More recent churn research has focused on combining predictive performance with interpretability. De Caigny et al.~\cite{decaigny2018} proposed a method based on Logistic Regression and Decision Trees, designed to balance predictive accuracy with comprehensibility. Their work demonstrates that churn systems should be both accurate and understandable to business users. Building on these studies, our project develops a telecom churn early warning system that combines supervised learning, class-imbalance handling, threshold tuning, feature interpretation, and dashboard deployment. Unlike studies that focus only on predictive modeling, our project emphasizes practical usability by allowing users to compare models, inspect churn drivers, adjust the probability threshold, and download a ranked list of at-risk customers.
+
+\section{Methodology}
+\subsection{Dataset}
+The dataset used in this project is the IBM Telco Customer Churn dataset. It contains 7,043 customer observations with demographics, account information, subscribed services, billing attributes, and churn outcomes. The target variable is \texttt{Churn Value}, where 1 indicates churn and 0 indicates no churn. The dataset is imbalanced: 1,869 customers churned and 5,174 did not, producing an overall churn rate of approximately 26.5\%. This motivates the use of recall, F1-score, ROC-AUC, and precision-recall curves during evaluation.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.5\linewidth]{overview_dashboard.png}
+  \caption{Streamlit dashboard overview summarizing dataset size, churn rate, churn distribution, and model comparison.}
+  \label{fig:overview}
+\end{figure}
+
+\subsection{Data preprocessing}
+A structured preprocessing pipeline was applied before model training.
+
+\begin{table}[H]
+\centering
+\footnotesize
+\resizebox{0.7\linewidth}{!}{%
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}p{0.28\linewidth}>{\raggedright\arraybackslash}p{0.24\linewidth}>{\raggedright\arraybackslash}X}
+\toprule
+\textbf{Column or feature type} & \textbf{Action} & \textbf{Reason} \\
+\midrule
+CustomerID, Count, geographic fields & Dropped & Non-informative identifiers or constants \\
+\midrule
+Churn Score, CLTV, Churn Reason, Churn Label & Dropped & Potential target leakage \\
+\midrule
+Total Charges & Converted to numeric & Originally stored as a string \\
+\midrule
+Blank Total Charges values & Filled with 0 & Correspond to zero-tenure customers \\
+\midrule
+Categorical variables & One-hot encoded & Required for Logistic Regression and compatible with tree models \\
+\midrule
+Continuous variables & Scaled in the Logistic Regression pipeline & Improves linear model optimization \\
+\midrule
+Train-test split & 80/20 stratified split & Preserves churn proportion in train and test sets \\
+\bottomrule
+\end{tabularx}%
+}
+\caption{Preprocessing steps used before model training.}
+\label{tab:preprocessing}
+\end{table}
+
+After preprocessing, categorical variables were one-hot encoded. Feature selection used chi-squared tests for binary categorical features, point-biserial correlation for continuous features, and variance inflation factor analysis for continuous-feature multicollinearity. The final feature set contained 27 variables.
+
+\subsection{Class imbalance strategy}
+Since churn customers represent the minority class, two imbalance-handling strategies were evaluated: balanced class weights and SMOTE. Balanced class weights penalize errors on churn customers more heavily, while SMOTE generates synthetic minority-class examples during training. Using Logistic Regression as a representative model, balanced class weights achieved recall of approximately 0.814, precision of 0.531, F1-score of 0.642, and ROC-AUC of 0.859. SMOTE achieved similar results, with recall of approximately 0.801, precision of 0.540, F1-score of 0.645, and ROC-AUC of 0.858. Balanced class weights were selected because they achieved slightly stronger recall while avoiding synthetic data generation. Because class imbalance makes the recall-precision trade-off especially important, the dashboard visualizes how changing the threshold affects both metrics. Lowering the threshold catches more churners but increases false positives, while raising it improves precision but may miss more actual churners. The graphs for each model are shown in section 5, figures 3 and 4. For Logistic Regression and Random Forest, balanced class weights were applied through the \texttt{class\_weight} parameter, which adjusts the loss function to penalize errors on the minority class more heavily. Gradient Boosting does not natively support class weighting in the same way, so it was trained without explicit imbalance correction. This asymmetry should be considered when interpreting model comparisons, since Gradient Boosting's higher precision and lower recall partly reflect its exposure to the original 73/27 class distribution rather than a balanced training signal.
+
+
+\subsection{Model selection}
+Three supervised classification models were trained and compared: Logistic Regression, Random Forest, and Gradient Boosting. They represent different levels of complexity and interpretability: Logistic Regression provides a transparent linear baseline, Random Forest captures nonlinear relationships through bagged trees, and Gradient Boosting builds a sequential ensemble that can improve churn-probability ranking.
+
+\paragraph{Logistic Regression.} Logistic Regression was used as the baseline because the target is binary. For feature vector $\mathbf{x}$, it estimates churn probability as
+\begin{equation}
+\begin{aligned}
+P(Y=1 \mid \mathbf{x}) &= \sigma(z)=\frac{1}{1+e^{-z}},
+& z &= \beta_0+\beta_1x_1+\cdots+\beta_px_p.
+\end{aligned}
+\end{equation}
+The model can also be written in log-odds form, making coefficients interpretable because positive values increase predicted churn risk while negative values reduce it:
+\begin{equation}
+\log\left(\frac{P(Y=1\mid \mathbf{x})}{1-P(Y=1\mid \mathbf{x})}\right)
+=\beta_0+\sum_{j=1}^{p}\beta_jx_j.
+\end{equation}
+The model minimizes binary cross-entropy loss with class weighting used to penalize churn-customer errors more heavily:
+\begin{equation}
+L(\beta)=-\frac{1}{n}\sum_{i=1}^{n}
+\left[y_i\log(\hat{p}_i)+(1-y_i)\log(1-\hat{p}_i)\right].
+\end{equation}
+
+\paragraph{Random Forest.} Random Forest was selected because churn behavior is unlikely to be fully linear and may depend on interactions among tenure, contract type, monthly charges, internet service, and payment method. It trains many decision trees on bootstrapped samples. Each tree produces a prediction $h_b(x)$, and the final class prediction and churn probability are:
+\begin{equation}
+\begin{aligned}
+\hat{y} &= \operatorname{mode}\{h_1(x),h_2(x),\ldots,h_B(x)\},
+& \hat{p}(Y=1\mid x) &= \frac{1}{B}\sum_{b=1}^{B}\mathbb{I}(h_b(x)=1).
+\end{aligned}
+\end{equation}
+This probability supports ranking customers and threshold adjustment in the dashboard. Random Forest was useful because it achieved the highest recall in the dashboard comparison.
+
+\paragraph{Gradient Boosting.} Gradient Boosting was included because each new tree corrects errors from previous trees. The additive model and negative gradient used at each iteration are:
+\begin{equation}
+\begin{aligned}
+F_M(x) &= F_0(x)+\sum_{m=1}^{M}\nu h_m(x),
+& r_{im} &=
+-\left[\frac{\partial L(y_i,F(x_i))}{\partial F(x_i)}\right]_{F(x)=F_{m-1}(x)}.
+\end{aligned}
+\end{equation}
+Here, $F_M(x)$ is the final model, $F_0(x)$ is the initial prediction, $h_m(x)$ is the weak learner, $M$ is the number of boosting stages, and $\nu$ is the learning rate. For churn prediction, Gradient Boosting captures complex interactions while producing probability scores. In this project, it achieved the highest ROC-AUC, meaning it ranked churners above non-churners better than the other models across thresholds.
+
+\paragraph{Threshold-based prediction.} Since the goal is an early warning system, model selection was not based only on the default 0.5 threshold. A customer is classified as at-risk when
+\begin{equation}
+\hat{y}_i=
+\begin{cases}
+1, & \hat{p}_i \geq t,\\
+0, & \hat{p}_i < t,
+\end{cases}
+\end{equation}
+where $t$ is the selected decision threshold. A lower threshold increases recall by flagging more customers, while a higher threshold improves precision by reducing unnecessary retention outreach. Overall, Logistic Regression was selected for interpretability, Random Forest for high recall, and Gradient Boosting for probability ranking, supporting both technical evaluation and business usability.
+
+\subsection{Hyperparameter tuning}
+GridSearchCV was used with recall as the scoring metric because the business objective prioritizes identifying churn customers. A false negative means a customer who actually churns is not flagged for intervention, which can be more costly than sending an unnecessary retention offer.
+
+\begin{table}[H]
+\centering
+\footnotesize
+\resizebox{0.7\linewidth}{!}{%
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}p{0.25\linewidth}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{0.25\linewidth}}
+\toprule
+\textbf{Model} & \textbf{Best parameters} & \textbf{Selection metric} \\
+\midrule
+Logistic Regression & $C=1$ & Cross-validation recall \\
+\midrule
+Random Forest & \texttt{max\_depth}=4, \texttt{n\_estimators}=100 & Cross-validation recall \\
+\midrule
+Gradient Boosting & \texttt{learning\_rate}=0.05, \texttt{max\_depth}=3, \texttt{n\_estimators}=200 & Cross-validation recall \\
+\bottomrule
+\end{tabularx}%
+}
+\caption{Best model configurations from GridSearchCV.}
+\label{tab:tuning}
+\end{table}
+
+For Logistic Regression, tuning regularization controlled the trade-off between fit and generalization. For Random Forest, limiting tree depth reduced overfitting while preserving nonlinear relationships. For Gradient Boosting, a lower learning rate with more estimators allowed gradual learning and improved probability ranking. The tuned models were evaluated using confusion matrices, ROC curves, and precision-recall curves because these plots show threshold behavior and minority-class performance.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.5\linewidth]{performance_curves_all_models.png}
+\caption{ROC curves and precision-recall curves for all models.}
+  
+  \label{fig:curves-section3}
+\end{figure}
+
+\section{Evaluation}
+\subsection{Evaluation metrics}
+To assess the quality of our model, we considered multiple metrics when evaluating model performance. The accuracy for each model was as follows: Logistic Regression: 0.744, Random Forest: 0.738, and Gradient Boosting: 0.803. While Random Forest and Logistic Regression were very close in accuracy, Gradient Boosting had higher accuracy, which is expected due to the dataset's imbalance of a 73/27 split across 7,043 customers, where 1,869 churned and 5,174 did not. A model that guessed no-churn for every customer would be right 73.5\% of the time, making accuracy an inefficient metric to understand all the models. Hence, to understand the models better, we used metrics that focus on identifying the minority data class, such as Precision, Recall, F1, and ROC-AUC. F1-score and recall were measured to determine the model's ability to identify churn vs no-churn customers. We also measured ROC-AUC to confirm that the model was able to distinguish between churn and no-churn and was not guessing randomly.
+
+
+\subsection{Prediction results}
+\begin{table}[H]
+\centering
+\scriptsize
+\resizebox{0.7\linewidth}{!}{%
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+\multirow{2}{*}{\textbf{Threshold}} & \multicolumn{3}{c}{\textbf{Precision}} & \multicolumn{3}{c}{\textbf{Recall}} & \multicolumn{3}{c}{\textbf{F-1}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
+& \textbf{GB} & \textbf{RF} & \textbf{LR} & \textbf{GB} & \textbf{RF} & \textbf{LR} & \textbf{GB} & \textbf{RF} & \textbf{LR} \\
+\midrule
+0.1 & 0.423 & 0.298 & 0.356 & 0.949 & 1.000 & 0.987 & 0.585 & 0.459 & 0.523 \\
+0.2 & 0.486 & 0.342 & 0.406 & 0.858 & 0.989 & 0.973 & 0.620 & 0.508 & 0.573 \\
+0.3 & 0.535 & 0.387 & 0.437 & 0.773 & 0.936 & 0.906 & 0.632 & 0.547 & 0.590 \\
+0.4 & 0.585 & 0.443 & 0.477 & 0.652 & 0.901 & 0.869 & 0.617 & 0.594 & 0.616 \\
+0.5 & 0.656 & 0.504 & 0.511 & 0.540 & 0.818 & 0.783 & 0.592 & 0.624 & 0.619 \\
+0.6 & 0.734 & 0.574 & 0.562 & 0.398 & 0.671 & 0.719 & 0.516 & 0.619 & 0.631 \\
+0.7 & 0.788 & 0.691 & 0.607 & 0.249 & 0.430 & 0.615 & 0.378 & 0.530 & 0.611 \\
+0.8 & 0.831 & 0.744 & 0.711 & 0.131 & 0.179 & 0.455 & 0.226 & 0.289 & 0.555 \\
+0.9 & 1.000 & 0.000 & 0.722 & 0.016 & 0.000 & 0.070 & 0.032 & 0.000 & 0.127 \\
+1.0 & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Precision, recall, and F-1 for  thresholds for Gradient Boosting, Random Forest, and Logistic Regression.}
+\label{tab:threshold-results}
+\end{table}
+
+The table above shows the results for the three model types: Random Forest (RF), Gradient Boosting (GB), and Logistic Regression (LR). Rather than evaluating each model at its individual peak threshold, 0.4 was selected as the common comparison threshold because it produced the tightest performance spread across all three models (0.023 in F1) with no model having a difference of 0.03 in F1 from its peak, enabling a fair comparison. LR had a Precision score of 0.477, recall of 0.869, F1 score of 0.616, and ROC-AUC score of 0.849. RF had a precision score of 0.443, recall of 0.901, F1 score of 0.594, and ROC-AUC score of 0.845. LR had 0.034 higher precision vs RF, with 0.022 higher F1 score, and 0.032 lower recall. On the other hand, GB had notably higher precision of 0.585, with a recall of 0.652, an F1 score of 0.617, and an ROC-AUC score of 0.853. GB was +0.108 in precision compared to LR and +0.142 in precision vs RF, at a cost of Recall: -0.249 vs RF and -0.217 vs LR. Since our experiment prioritizes recall, this tradeoff favors RF and LR for our use case, as having fewer false negatives is also important. The charts below are the charts for precision vs recall tradeoff for each model.
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.25\linewidth}
+\centering
+\textbf{Gradient Boosting:}\\[0.25em]
+\includegraphics[width=\linewidth]{pr_tradeoff_gradient_boosting.png}
+\end{minipage}\hfill
+\begin{minipage}{0.25\linewidth}
+\centering
+\textbf{Logistic Regression:}\\[0.25em]
+\includegraphics[width=\linewidth]{pr_tradeoff_logistic_regression.png}
+\end{minipage}\hfill
+\begin{minipage}{0.25\linewidth}
+\centering
+\textbf{Random Forest:}\\[0.25em]
+\includegraphics[width=\linewidth]{pr_tradeoff_random_forest.png}
+\end{minipage}
+\caption{Precision vs recall trade-off charts for each model.}
+\label{fig:pr-tradeoffs}
+\end{figure}
+
+Each model has a unique Precision vs. Recall graph with a different crossing point, where precision is equal to recall. For this graph, the cross point for all models was at around y=0.6. Gradient Boosting has a crossing point of 0.44, showing that it becomes very selective past this threshold and loses recall rapidly. Logistic Regression has a crossing point of 0.71, meaning that it preserves recall relatively well across many thresholds. Random Forest has a crossing point of 0.63, making it also robust across a wide range of thresholds. Since our experiment prioritizes recall, using a comparison threshold of 0.4 makes the comparison fair because all three models maintain higher recall at that threshold.
+
+
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Metric} & \textbf{Logistic Regression} & \textbf{Random Forest} & \textbf{Gradient Boosting} \\
+\midrule
+ROC-AUC & 0.849 & 0.845 & 0.853 \\
+\bottomrule
+\end{tabular}
+\caption{ROC-AUC comparison across models.}
+\label{tab:rocauc}
+\end{table}
+
+Referencing figure 2, the ROC curves for each model are nearly identical, with a max difference of 0.008 between the highest and lowest value. This means that all models performed similarly when distinguishing between churn and no-churn customers. Precision vs. Recall curves show that Logistic Regression and Random Forest have the same scores, while Gradient Boosting is higher at 0.669 vs. 0.644. This suggests that Gradient Boosting has higher precision at the same recall levels. The graph supports the conclusion that when precision is the priority, Gradient Boosting is the ideal model, but when recall is the main priority, Random Forest or Logistic Regression is a better choice.
+
+
+\begin{table}[H]
+\centering
+\footnotesize
+\begin{tabularx}{\linewidth}{XXX}
+\toprule
+\textbf{Random Forest} & \textbf{Logistic Regression} & \textbf{Gradient Boosting} \\
+\midrule
+Tenure Months & Tenure Months & Tenure Months \\
+\midrule
+Contract Two Years & Monthly Charges & Internet Service Fiber optic \\
+\midrule
+Internet Service Fiber optic & Dependents & Payment Method Electronic Check \\
+\midrule
+Dependents & Internet Service Fiber optic & Dependents \\
+\midrule
+Payment Method Electronic Check & Contract Two Years & Contract Two Years \\
+\bottomrule
+\end{tabularx}
+\caption{Model rankings.}
+\label{tab:model-rankings}
+\end{table}
+
+Across all models, there were four common factors: Tenure Months ranked highest for each model, and each model included Contract Two Years, Internet Service Fiber Optic, and Dependents. Logistic Regression valued Monthly Charges as the second highest factor, which the other models did not. Gradient Boosting and Random Forest had the same factors in different orders, despite using different training methods. Because the models use different scales and training approaches, raw values should not be compared directly, making rankings the best way to compare feature importance.
+
+
+\section{Discussion}
+
+The goal of this project was to create a model that identifies which customers have the highest churn risk and which factors contribute to that risk. After training and testing the models, their metrics were used to compare how each model performs across different use cases. The tradeoff between precision and recall was significant across the models and thresholds. If losing a customer is far more costly than sending a retention offer, Random Forest or Logistic Regression is the better choice. However, if verification and outreach costs are higher, Gradient Boosting with higher precision is the better option. The figures below represent the confusion matrices for each model at the 0.4 threshold.
+
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.25\linewidth}
+\centering
+\includegraphics[width=\linewidth]{confusion_rf.png}
+\end{minipage}\hfill
+\begin{minipage}{0.25\linewidth}
+\centering
+\includegraphics[width=\linewidth]{confusion_lr.png}
+\end{minipage}\hfill
+\begin{minipage}{0.25\linewidth}
+\centering
+\includegraphics[width=\linewidth]{confusion_gb.png}
+\end{minipage}
+\caption{Confusion matrices for Random Forest, Logistic Regression, and Gradient Boosting at threshold 0.4.}
+\label{fig:confusion}
+\end{figure}
+
+For example, if sending a retention offer costs \$100 and losing a customer costs \$500, Random Forest is the better option because of its higher recall. At the 0.4 threshold, it identified 337 churners, saving \$168,500 in retained revenue, while spending \$76,100 on retention offers and losing \$18,500 from 37 missed churners, yielding a net value of \$73,900. Gradient Boosting identified 244 churners, saving \$122,000, while spending \$41,700 on offers and losing \$65,000 from 130 missed churners, yielding a net value of \$15,300. Under these assumptions, Random Forest produces nearly 5x the net value of Gradient Boosting, showing that recall is more important when the cost of losing a customer outweighs the cost of a retention offer. Even when only 30\% of flagged customers respond to offers, Random Forest remains better, with a net value of -\$25,810 compared to -\$46,410 for Gradient Boosting.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.52\linewidth}
+    \centering
+    \includegraphics[width=0.86\linewidth]{lr_coefficients.png}
+    \captionof{figure}{Logistic Regression coefficients. Negative means no-churn.}
+    \label{fig:lr-coefficients}
+\end{minipage}
+\hfill
+\begin{minipage}{0.44\linewidth}
+    \centering
+    \begin{tabular}{lr}
+    \toprule
+    \textbf{Logistic Regression} & \textbf{Coefficient} \\
+    \midrule
+    Tenure Months & -1.205 \\
+    Monthly Charges & -0.817 \\
+    Dependents\_Yes & -0.691 \\
+    Internet Service Fiber Optic & 0.677 \\
+    Contract Two Year & -0.607 \\
+    \bottomrule
+    \end{tabular}
+    \captionof{table}{Top LR coefficients. Negative means no-churn.}
+    \label{tab:lr-coefficients}
+\end{minipage}
+\end{figure}
+Data analysis showed several interesting trends. Customers on month-to-month contracts were far more likely to churn, likely because they have more flexibility and lower switching friction. In contrast, customers on two-year contracts were less likely to leave because the long-term commitment locked them into one company. Other important factors included electronic check payments, which correlated with higher churn, and not having dependents, which may make leaving easier. Due to the nature of Logistic Regression, we can sum coefficients to interpret combined effects. For customers with dependents who also bought Internet Service Fiber Optic, the two coefficients sum to $-0.014$, which is too close to 0 for the model to be confident, assuming other variables remain unchanged. Another important finding was that 54.6\% of customers with Internet Service Fiber Optic on a month-to-month plan churned. The model identified this relationship and showed that these two factors were major contributors to churn prediction, as these customers were more than twice as likely to churn compared to the baseline rate of 26.5\%. Additionally, customers on month-to-month plans had a churn rate of 42.7\%, and 1,655/1,869 churners, or 88.6\%, were on month-to-month plans, showing the strong impact of contract type.
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.45\linewidth]{shap_rf.png}
+\caption{Top 15 features by SHAP impact for the Random Forest model.}
+\label{fig:shap}
+\end{figure}
+
+Using SHAP gives a deeper look into the Random Forest model by showing which features had the largest impact on churn prediction. Tenure Months had the highest mean absolute SHAP value, followed by Two Year Contract, Internet Service Fiber Optic, and Dependents. However, SHAP values only show the strength of each factor, not the direction. Logistic Regression, which ranked similar factors, gives a clearer direction for how each feature affects churn.  These findings are consistent across both models, as Tenure Months, Dependents, and Internet Service Fiber Optic were important in each, as the mean absolute SHAP value was greater than 0.06 for two-year contracts and Tenure Months. Random Forest ranked Two Year Contract higher than Logistic Regression and also included Payment Method, while Logistic Regression emphasized Monthly Charges instead. Overall, the results show that each model has different strengths: Random Forest and Logistic Regression are better when recall is prioritized, while Gradient Boosting is better when precision is prioritized.
+
+
+\section{Limitations}
+While this experiment was very interesting, there were some limitations in this project. Firstly, the results of the experiment vary as per the needs of the business and whether losing one customer is far more expensive than having multiple false positives. Secondly, while these factors are consistent across numerous customers, correlation does not prove causation, in the sense that a customer might have similar traits to those with churn, such as no dependents and a month to month plan and still be a customer for years. There may also be cases where customers might be members who sign up for a two year plan and then find means to churn, so the experiment does have variance and customer behavior changes as per region, background, and multiple other factors. Some other limits are that the data is from one specific company rather than a state or country, so churn behaviors may vary from company to company, and companies with different factors such as different contract times or different prices may have different factors for churn. So while this experiment helps with one company, it does not represent the overall industry or one specific area.
+
+\begin{thebibliography}{9}
+
+\bibitem{neslin2006}
+Neslin, Scott A., et al. ``Defection Detection: Measuring and Understanding the Predictive Accuracy of Customer Churn Models.'' \emph{Journal of Marketing Research}, vol. 43, no. 2, 2006, pp. 204--211.
+
+\bibitem{lemmens2006}
+Lemmens, Aurelie, and Christophe Croux. ``Bagging and Boosting Classification Trees to Predict Churn.'' \emph{Journal of Marketing Research}, vol. 43, no. 2, 2006, pp. 276--286.
+
+\bibitem{amin2017}
+Amin, Adnan, et al. ``Customer Churn Prediction in the Telecommunication Sector Using a Rough Set Approach.'' \emph{Neurocomputing}, vol. 237, 2017, pp. 242--254.
+
+\bibitem{burez2009}
+Burez, Jonathan, and Dirk Van den Poel. ``Handling Class Imbalance in Customer Churn Prediction.'' \emph{Expert Systems with Applications}, vol. 36, no. 3, 2009, pp. 4626--4636.
+
+\bibitem{glady2009}
+Glady, Nicolas, Bart Baesens, and Christophe Croux. ``Modeling Churn Using Customer Lifetime Value.'' \emph{European Journal of Operational Research}, vol. 197, no. 1, 2009, pp. 402--411.
+
+\bibitem{decaigny2018}
+De Caigny, Arno, Kristof Coussement, and Koen W. De Bock. ``A New Hybrid Classification Algorithm for Customer Churn Prediction Based on Logistic Regression and Decision Trees.'' \emph{European Journal of Operational Research}, vol. 269, no. 2, 2018, pp. 760--772.
+
+\end{thebibliography}
+
+\end{document}
