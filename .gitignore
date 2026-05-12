@@ -10,9 +10,6 @@ Telco-Customer-Churn.csv
 # Loose PNG exports (plots are embedded in the notebook)
 *.png
 
-# Local editor settings
-.claude/
-
 # Python cache
 __pycache__/
 *.pyc
