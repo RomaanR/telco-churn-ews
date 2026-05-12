@@ -10,7 +10,7 @@ Telco-Customer-Churn.csv
 # Loose PNG exports (plots are embedded in the notebook)
 *.png
 
-# Claude Code settings
+# Local editor settings
 .claude/
 
 # Python cache
